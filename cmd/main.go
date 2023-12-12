@@ -17,13 +17,12 @@ func main() {
 	rootCmd := &cobra.Command{
 		Use:   "plio",
 		Short: "plio checks if your infra is SOC2 compliant",
-		Run: func(cmd *cobra.Command, _ []string) {
+		Run: func(_ *cobra.Command, _ []string) {
 			aws, err := integration.NewAWS()
 			if err != nil {
 				klog.Exitf("Failed to create AWS integration: %v", err)
 			}
-			_, err = aws.Check()
-			if err != nil {
+			if err = aws.Check(); err != nil {
 				klog.Exitf("AWS check failed: %v", err)
 			}
 		},
