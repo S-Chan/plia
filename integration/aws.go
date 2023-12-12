@@ -11,14 +11,17 @@ import (
 
 // AWS checks that the user's AWS infra is SOC2 compliant
 type AWS struct {
-	IAM IAM
+	IAM *IAM
 }
 
 // New returns a new AWS integration
-func NewAWS() *AWS {
-	return &AWS{
-		IAM: IAM{},
+func NewAWS() (*AWS, error) {
+	s, err := session.NewSession()
+	if err != nil {
+		return nil, err
 	}
+
+	return &AWS{IAM: NewIAM(s)}, nil
 }
 
 // Check checks that the user's AWS infra is SOC2 compliant
@@ -28,27 +31,38 @@ func (a *AWS) Check() (bool, error) {
 
 // IAM checks that the user's IAM infra is SOC2 compliant
 type IAM struct {
+	iamAPI *iam.IAM
 }
 
+// NewIAM returns a new IAM integration
+func NewIAM(s *session.Session) *IAM {
+	return &IAM{iamAPI: iam.New(s)}
+}
+
+// Check checks that the user's IAM infra is SOC2 compliant
 func (i *IAM) Check() (bool, error) {
-	s, err := session.NewSession()
-	if err != nil {
-		return false, err
-	}
+	return i.checkConsoleMFA()
+}
 
-	iamAPI := iam.New(s)
-
+// checkConsoleMFA checks that IAM users with console access have MFA enabled
+func (i *IAM) checkConsoleMFA() (bool, error) {
 	nonMFAUsers := []string{}
 
-	users, err := iamAPI.ListUsers(&iam.ListUsersInput{})
+	users, err := i.iamAPI.ListUsers(&iam.ListUsersInput{})
 	if err != nil {
 		return false, err
 	}
 	for _, user := range users.Users {
-		mfa, err := iamAPI.ListMFADevices(&iam.ListMFADevicesInput{UserName: user.UserName})
+		mfa, err := i.iamAPI.ListMFADevices(&iam.ListMFADevicesInput{UserName: user.UserName})
 		if err != nil {
 			return false, err
 		}
+		_, err = i.iamAPI.GetLoginProfile(&iam.GetLoginProfileInput{UserName: user.UserName})
+		if err != nil {
+			klog.V(4).InfoS("User does not have console access; skipping MFA check", "user", aws.StringValue(user.UserName))
+			continue
+		}
+
 		if mfa.MFADevices == nil {
 			nonMFAUsers = append(nonMFAUsers, aws.StringValue(user.UserName))
 		} else {
