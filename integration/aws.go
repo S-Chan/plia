@@ -25,7 +25,7 @@ func NewAWS() (*AWS, error) {
 }
 
 // Check checks that the user's AWS infra is SOC2 compliant
-func (a *AWS) Check() (bool, error) {
+func (a *AWS) Check() error {
 	return a.IAM.Check()
 }
 
@@ -40,22 +40,22 @@ func NewIAM(s *session.Session) *IAM {
 }
 
 // Check checks that the user's IAM infra is SOC2 compliant
-func (i *IAM) Check() (bool, error) {
+func (i *IAM) Check() error {
 	return i.checkConsoleMFA()
 }
 
 // checkConsoleMFA checks that IAM users with console access have MFA enabled
-func (i *IAM) checkConsoleMFA() (bool, error) {
+func (i *IAM) checkConsoleMFA() error {
 	nonMFAUsers := []string{}
 
 	users, err := i.iamAPI.ListUsers(&iam.ListUsersInput{})
 	if err != nil {
-		return false, err
+		return err
 	}
 	for _, user := range users.Users {
 		mfa, err := i.iamAPI.ListMFADevices(&iam.ListMFADevicesInput{UserName: user.UserName})
 		if err != nil {
-			return false, err
+			return err
 		}
 		_, err = i.iamAPI.GetLoginProfile(&iam.GetLoginProfileInput{UserName: user.UserName})
 		if err != nil {
@@ -71,8 +71,8 @@ func (i *IAM) checkConsoleMFA() (bool, error) {
 	}
 
 	if len(nonMFAUsers) > 0 {
-		return false, fmt.Errorf("MFA not enabled for users %v", nonMFAUsers)
+		return fmt.Errorf("MFA not enabled for users %v", nonMFAUsers)
 	}
 
-	return true, nil
+	return nil
 }
