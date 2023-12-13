@@ -34,7 +34,7 @@ jobs:
       with:
         role-to-assume: arn:aws:iam::666190772232:role/PlioGithubActions
         role-session-name: plio-deploy
-        aws-region: ${{ env.AWS_REGION }}
+        aws-region: us-east-1
     - run: |
         curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
         curl -s "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh"  | bash
