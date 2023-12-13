@@ -1,0 +1,27 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: plio
+  namespace: plio
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 1
+  selector:
+    matchLabels:
+      app: plio
+  template:
+    metadata:
+      labels:
+        app: plio
+    spec:
+      serviceAccountName: plio
+      containers:
+      - name: plio
+        image: plio:overrideme
+        ports:
+        - containerPort: 8000
+          name: app
