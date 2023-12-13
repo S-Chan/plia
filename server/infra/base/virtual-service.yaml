@@ -1,0 +1,16 @@
+apiVersion: networking.istio.io/v1alpha3
+kind: VirtualService
+metadata:
+  name: plio
+  namespace: plio
+spec:
+  hosts:
+  - "api.runplio.com"
+  gateways:
+  - plio/plio
+  http:
+  - route:
+    - destination:
+        host: plio.plio.svc.cluster.local
+        port:
+          number: 8000

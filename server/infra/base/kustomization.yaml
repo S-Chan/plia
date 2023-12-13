@@ -1,0 +1,7 @@
+resources:
+- certificate.yaml
+- deployment.yaml
+- gateway.yaml
+- service.yaml
+- serviceaccount.yaml
+- virtual-service.yaml
