@@ -15,7 +15,7 @@ jobs:
       with:
         role-to-assume: arn:aws:iam::666190772232:role/PlioGithubActions
         role-session-name: plio-build
-        aws-region: ${{ env.AWS_REGION }}
+        aws-region: ${{ vars.AWS_REGION }}
     - id: login-ecr
       uses: aws-actions/amazon-ecr-login@v2
     - env:
