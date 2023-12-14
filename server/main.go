@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 
 	klog "k8s.io/klog/v2"
@@ -50,7 +51,7 @@ func runAWSIntegration(w http.ResponseWriter, _ *http.Request) {
 
 	if err = aws.Check(); err != nil {
 		klog.ErrorS(err, "AWS check failed")
-		awsResp("AWS check failed", "failed")
+		awsResp(fmt.Sprintf("%v", err), "noncompliant")
 		return
 	}
 

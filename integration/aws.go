@@ -71,7 +71,7 @@ func (i *IAM) checkConsoleMFA() error {
 	}
 
 	if len(nonMFAUsers) > 0 {
-		return fmt.Errorf("MFA not enabled for users %v", nonMFAUsers)
+		return fmt.Errorf("MFA not enabled for users %v with console access", nonMFAUsers)
 	}
 
 	return nil
