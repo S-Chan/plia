@@ -9,7 +9,7 @@ cli: install_deps
 	go build -o out/plio -v ./cmd
 
 server: install_deps
-	GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -ldflags '-extldflags "-static"' -o out/server -v ./server
+	CGO_ENABLED=0 go build -ldflags '-extldflags "-static"' -o out/server -v ./server
 
 install_deps:
 	go get -v ./...
