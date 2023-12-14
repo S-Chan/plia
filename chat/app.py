@@ -65,11 +65,10 @@ if prompt := st.chat_input('How can I help you?'):
             for call in st.session_state.run.required_action.submit_tool_outputs.tool_calls:
                 match call.function.name:
                     case 'GetIntegrations':
-                        url = 'https://api.runplio.com/integrations'
+                        resp = requests.get('https://api.runplio.com/integrations')
                     case 'RunAWSIntegration':
-                        url = 'https://api.runplio.com/integrations/aws'
+                        resp = requests.post('https://api.runplio.com/integrations/aws')
 
-                resp = requests.get(url)
                 tool_outputs.append({
                     'tool_call_id': call.id,
                     'output': str(resp.json()),

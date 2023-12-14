@@ -22,7 +22,12 @@ type AWSIntegrationResponse struct {
 }
 
 // getIntegrations handles the /integrations endpoint
-func getIntegrations(w http.ResponseWriter, _ *http.Request) {
+func getIntegrations(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
 	response := []Integration{
 		{Name: "AWS"},
 	}
@@ -32,7 +37,12 @@ func getIntegrations(w http.ResponseWriter, _ *http.Request) {
 }
 
 // runAWSIntegration handles the /integrations/aws endpoint
-func runAWSIntegration(w http.ResponseWriter, _ *http.Request) {
+func runAWSIntegration(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
 	awsResp := func(info, status string) {
 		response := AWSIntegrationResponse{
 			Info:   info,
