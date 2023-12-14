@@ -39,5 +39,6 @@ jobs:
     - run: |
         curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
         curl -s "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh"  | bash
-        cd server/infra/demo && kustomize edit set image plio=666190772232.dkr.ecr.us-east-1.amazonaws.com/plio:${{ github.sha }}
+    - run: |
+        (cd server/infra/demo && kustomize edit set image plio=666190772232.dkr.ecr.us-east-1.amazonaws.com/plio:${{ github.sha }})
         kubectl apply -k server/infra/demo && kubectl rollout restart deployment plio-demo -n plio-demo
