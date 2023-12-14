@@ -2,7 +2,7 @@ apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
   name: plio
-  namespace: plio
+  namespace: istio-system
 spec:
   secretName: plio
   duration: 2160h # 90d

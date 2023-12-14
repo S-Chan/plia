@@ -2,7 +2,6 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: plio
-  namespace: plio
 spec:
   replicas: 2
   strategy:
