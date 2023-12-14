@@ -1,7 +1,14 @@
 resources:
 - ./../base
 nameSuffix: -demo
-namespace: plio-demo
+transformers:
+  - |-
+    apiVersion: builtin
+    kind: NamespaceTransformer
+    metadata:
+      name: unused
+      namespace: plio-demo
+    unsetOnly: true
 patches:
 - patch: |-
     - op: replace
