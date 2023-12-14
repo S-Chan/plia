@@ -7,6 +7,14 @@ spec:
     istio: ingressgateway
   servers:
   - port:
+      number: 80
+      name: http
+      protocol: HTTP
+    hosts:
+    - "api.runplio.com"
+    tls:
+      httpsRedirect: true
+  - port:
       number: 443
       name: https
       protocol: HTTPS
