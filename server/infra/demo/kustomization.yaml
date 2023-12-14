@@ -23,5 +23,13 @@ patches:
       value: plio-demo.plio-demo.svc.cluster.local
   target:
     kind: VirtualService
+- patch: |-
+    - op: add
+      path: "/metadata/annotations"
+      value:
+        eks.amazonaws.com/role-arn: arn:aws:iam::666190772232:role/PlioDemo
+  target:
+    kind: ServiceAccount
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
+
