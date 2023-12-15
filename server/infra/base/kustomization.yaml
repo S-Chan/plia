@@ -1,9 +1,0 @@
-resources:
-- authorization-policy.yaml
-- certificate.yaml
-- deployment.yaml
-- gateway.yaml
-- request-authentication.yaml
-- service.yaml
-- serviceaccount.yaml
-- virtual-service.yaml
