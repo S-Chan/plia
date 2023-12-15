@@ -1,3 +1,5 @@
+awscli
+kubernetes
 openai
 requests
 streamlit
