@@ -1,9 +1,35 @@
+import os
+import subprocess
 import time
 import uuid
 
+import kubernetes
 import openai
 import requests
 import streamlit as st
+
+os.environ['AWS_ACCESS_KEY_ID'] = st.secrets['AWS_ACCESS_KEY_ID']
+os.environ['AWS_SECRET_ACCESS_KEY'] = st.secrets['AWS_SECRET_ACCESS_KEY']
+
+subprocess.run(
+    [
+        'aws',
+        'eks',
+        'update-kubeconfig',
+        '--name',
+        'app-server',
+        '--region',
+        'us-east-1',
+    ],
+    check=True,
+)
+
+kubernetes.config.load_kube_config()
+token = kubernetes.client.CoreV1Api().create_namespaced_service_account_token(
+    namespace='default',
+    name='default',
+    body=kubernetes.client.V1ServiceAccountTokenProjection(path=''),
+)
 
 client = openai.OpenAI()
 
@@ -65,9 +91,15 @@ if prompt := st.chat_input('How can I help you?'):
             for call in st.session_state.run.required_action.submit_tool_outputs.tool_calls:
                 match call.function.name:
                     case 'GetIntegrations':
-                        resp = requests.get('https://api.runplio.com/integrations')
+                        resp = requests.get(
+                            'https://api.runplio.com/integrations',
+                            headers={'Authorization': f"Bearer {token.status.token}"},
+                        )
                     case 'RunAWSIntegration':
-                        resp = requests.post('https://api.runplio.com/integrations/aws')
+                        resp = requests.post(
+                            'https://api.runplio.com/integrations/aws',
+                            headers={'Authorization': f"Bearer {token.status.token}"},
+                        )
 
                 tool_outputs.append({
                     'tool_call_id': call.id,
