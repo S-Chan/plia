@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 
 	"github.com/spf13/cobra"
@@ -17,14 +18,21 @@ func main() {
 	rootCmd := &cobra.Command{
 		Use:   "plio",
 		Short: "plio checks if your infra is SOC2 compliant",
-		Run: func(_ *cobra.Command, _ []string) {
+		Run: func(cmd *cobra.Command, _ []string) {
 			aws, err := integration.NewAWS()
 			if err != nil {
-				klog.Exitf("Failed to create AWS integration: %v", err)
+				klog.Exitf("AWS integration creation failed: %v", err)
 			}
-			if err = aws.Check(); err != nil {
+			res, err := aws.Check()
+			if err != nil {
 				klog.Exitf("AWS check failed: %v", err)
 			}
+			// convert res to json and print out using command
+			jsonRes, err := json.Marshal(res)
+			if err != nil {
+				klog.Exitf("result serialization failed: %v", err)
+			}
+			cmd.Println(string(jsonRes))
 		},
 	}
 
