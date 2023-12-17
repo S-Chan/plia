@@ -16,9 +16,9 @@ type AWS struct {
 }
 
 // New returns a new AWS integration
-func NewAWS() (*AWS, error) {
+func NewAWS(region string) (*AWS, error) {
 	// TODO: allow users to specify region
-	s, err := session.NewSession(aws.NewConfig().WithRegion("us-east-1"))
+	s, err := session.NewSession(aws.NewConfig().WithRegion(region))
 	if err != nil {
 		return nil, err
 	}
