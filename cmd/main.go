@@ -19,7 +19,7 @@ func main() {
 		Use:   "plio",
 		Short: "plio checks if your infra is SOC2 compliant",
 		Run: func(cmd *cobra.Command, _ []string) {
-			aws, err := integration.NewAWS()
+			aws, err := integration.NewAWS(cmd.Flag("region").Value.String())
 			if err != nil {
 				klog.Exitf("AWS integration creation failed: %v", err)
 			}
@@ -37,5 +37,6 @@ func main() {
 	}
 
 	rootCmd.Flags().AddGoFlagSet(&fs)
+	rootCmd.Flags().String("region", "us-east-1", "AWS region to check")
 	rootCmd.Execute()
 }
