@@ -70,7 +70,17 @@ func (i *IAM) Check() ([]Result, error) {
 		return nil, err
 	}
 
-	return append(mfaRes, staleCredsRes...), nil
+	rootMfaRes, err := i.checkRootAccountMFA()
+	if err != nil {
+		return nil, err
+	}
+
+	rootAccessKeysRes, err := i.checkRootAccountAccessKeys()
+	if err != nil {
+		return nil, err
+	}
+
+	return append(append(append(mfaRes, staleCredsRes...), rootMfaRes...), rootAccessKeysRes...), nil
 }
 
 // checkConsoleMFA checks that IAM users with console access have MFA enabled
@@ -93,7 +103,7 @@ func (i *IAM) checkConsoleMFA() ([]Result, error) {
 		if err != nil {
 			mfaRes = append(
 				mfaRes,
-				i.userResult(user, rule, true, "User does not have console access"),
+				i.userResult(aws.StringValue(user.Arn), rule, true, "User does not have console access"),
 			)
 			continue
 		}
@@ -101,10 +111,10 @@ func (i *IAM) checkConsoleMFA() ([]Result, error) {
 		if mfa.MFADevices == nil {
 			mfaRes = append(
 				mfaRes,
-				i.userResult(user, rule, false, "User does not have MFA enabled"),
+				i.userResult(aws.StringValue(user.Arn), rule, false, "User does not have MFA enabled"),
 			)
 		} else {
-			mfaRes = append(mfaRes, i.userResult(user, rule, true, ""))
+			mfaRes = append(mfaRes, i.userResult(aws.StringValue(user.Arn), rule, true, ""))
 		}
 	}
 
@@ -140,10 +150,10 @@ func (i *IAM) checkIAMUsersUnusedCreds() ([]Result, error) {
 			if out.AccessKeyLastUsed.LastUsedDate != nil && out.AccessKeyLastUsed.LastUsedDate.AddDate(0, 0, 90).Before(time.Now()) {
 				staleCredsRes = append(
 					staleCredsRes,
-					i.userResult(user, rule, false, "User has credentials unused for more than 90 days"),
+					i.userResult(aws.StringValue(user.Arn), rule, false, "User has credentials unused for more than 90 days"),
 				)
 			} else {
-				staleCredsRes = append(staleCredsRes, i.userResult(user, rule, true, ""))
+				staleCredsRes = append(staleCredsRes, i.userResult(aws.StringValue(user.Arn), rule, true, ""))
 			}
 		}
 	}
@@ -151,11 +161,43 @@ func (i *IAM) checkIAMUsersUnusedCreds() ([]Result, error) {
 	return staleCredsRes, nil
 }
 
-func (i *IAM) userResult(user *iam.User, rule string, compliant bool, reason string) Result {
+// checkRootAccountMFA checks that the root account has MFA enabled
+func (i *IAM) checkRootAccountMFA() ([]Result, error) {
+	rule := "Root account must have MFA enabled"
+
+	root, err := i.iamAPI.GetAccountSummary(&iam.GetAccountSummaryInput{})
+	if err != nil {
+		return nil, err
+	}
+
+	if aws.Int64Value(root.SummaryMap["AccountMFAEnabled"]) == 0 {
+		return []Result{i.userResult("root", rule, false, "Root account does not have MFA enabled")}, nil
+	}
+
+	return []Result{i.userResult("root", rule, true, "")}, nil
+}
+
+// checkRootAccountAccessKeys checks that the root account has no access keys
+func (i *IAM) checkRootAccountAccessKeys() ([]Result, error) {
+	rule := "Root account must not have access keys"
+
+	root, err := i.iamAPI.GetAccountSummary(&iam.GetAccountSummaryInput{})
+	if err != nil {
+		return nil, err
+	}
+
+	if aws.Int64Value(root.SummaryMap["AccountAccessKeysPresent"]) != 0 {
+		return []Result{i.userResult("root", rule, false, "Root account has access keys")}, nil
+	}
+
+	return []Result{i.userResult("root", rule, true, "")}, nil
+}
+
+func (i *IAM) userResult(name, rule string, compliant bool, reason string) Result {
 	return Result{
 		Resource: Resource{
 			Type: "aws/iam-user",
-			Name: aws.StringValue(user.Arn),
+			Name: name,
 		},
 		Rule:      rule,
 		Compliant: compliant,
