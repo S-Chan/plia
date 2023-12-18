@@ -5,6 +5,7 @@ import (
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
+	"github.com/aws/aws-sdk-go/service/ec2"
 	"github.com/aws/aws-sdk-go/service/iam"
 	"github.com/aws/aws-sdk-go/service/s3"
 )
@@ -13,6 +14,7 @@ import (
 type AWS struct {
 	IAM *IAM
 	S3  *S3
+	VPC *VPC
 }
 
 // New returns a new AWS integration
@@ -23,7 +25,7 @@ func NewAWS(region string) (*AWS, error) {
 		return nil, err
 	}
 
-	return &AWS{IAM: NewIAM(s), S3: NewS3(s)}, nil
+	return &AWS{IAM: NewIAM(s), S3: NewS3(s), VPC: NewVPC(s)}, nil
 }
 
 // Check checks that the user's AWS infra is SOC2 compliant
@@ -38,7 +40,12 @@ func (a *AWS) Check() ([]Result, error) {
 		return nil, err
 	}
 
-	return append(iamRes, s3Res...), nil
+	vpcRes, err := a.VPC.Check()
+	if err != nil {
+		return nil, err
+	}
+
+	return append(append(iamRes, s3Res...), vpcRes...), nil
 }
 
 // IAM checks that the user's IAM infra is SOC2 compliant
@@ -222,6 +229,81 @@ func (s *S3) bucketResult(bucket *s3.Bucket, rule string, compliant bool, reason
 		Resource: Resource{
 			Type: "aws/s3-bucket",
 			Name: aws.StringValue(bucket.Name),
+		},
+		Rule:      rule,
+		Compliant: compliant,
+		Reason:    reason,
+	}
+}
+
+// VPC checks that the user's VPCs are SOC2 compliant
+type VPC struct {
+	ec2API *ec2.EC2
+}
+
+// NewVPC returns a new VPC integration
+func NewVPC(s *session.Session) *VPC {
+	return &VPC{ec2API: ec2.New(s)}
+}
+
+// Check checks that the user's VPCs are SOC2 compliant
+func (v *VPC) Check() ([]Result, error) {
+	return v.checkVPCFlowLogs()
+}
+
+// checkVPCFlowLogs checks that VPC flow logs are enabled
+func (v *VPC) checkVPCFlowLogs() ([]Result, error) {
+	var vpcRes []Result
+	rule := "VPC flow logs must be enabled"
+
+	// use describe-region api to list all regions
+	regions, err := v.ec2API.DescribeRegions(nil)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, region := range regions.Regions {
+		regionSession := session.Must(
+			session.NewSession(
+				aws.NewConfig().WithRegion(aws.StringValue(region.RegionName))))
+		regionEC2API := ec2.New(regionSession)
+
+		vpcs, err := regionEC2API.DescribeVpcs(nil)
+		if err != nil {
+			return nil, err
+		}
+
+		for _, vpc := range vpcs.Vpcs {
+			flowLogs, err := regionEC2API.DescribeFlowLogs(
+				&ec2.DescribeFlowLogsInput{Filter: []*ec2.Filter{
+					{
+						Name:   aws.String("resource-id"),
+						Values: []*string{vpc.VpcId},
+					},
+				}})
+			if err != nil {
+				return nil, err
+			}
+
+			if len(flowLogs.FlowLogs) == 0 {
+				vpcRes = append(
+					vpcRes,
+					v.vpcResult(vpc, rule, false, "VPC flow logs are not enabled"),
+				)
+			} else {
+				vpcRes = append(vpcRes, v.vpcResult(vpc, rule, true, ""))
+			}
+		}
+	}
+
+	return vpcRes, nil
+}
+
+func (v *VPC) vpcResult(vpc *ec2.Vpc, rule string, compliant bool, reason string) Result {
+	return Result{
+		Resource: Resource{
+			Type: "aws/vpc",
+			Name: aws.StringValue(vpc.VpcId),
 		},
 		Rule:      rule,
 		Compliant: compliant,
