@@ -87,12 +87,18 @@ func (i *IAM) Check() ([]Result, error) {
 		return nil, err
 	}
 
+	userPolicyRes, err := i.checkNoUserPolicies()
+	if err != nil {
+		return nil, err
+	}
+
 	return concatSlice(
 		mfaRes,
 		staleCredsRes,
 		rootMfaRes,
 		rootAccessKeysRes,
 		adminPolicyRes,
+		userPolicyRes,
 	), nil
 }
 
@@ -260,6 +266,43 @@ NEXTPOLICY:
 	}
 
 	return statementsRes, nil
+}
+
+// checkNoUserPolicies checks that no users have policies attached
+func (i *IAM) checkNoUserPolicies() ([]Result, error) {
+	var userPoliciesRes []Result
+	rule := "IAM users must not have policies attached"
+
+	users, err := i.iamAPI.ListUsers(&iam.ListUsersInput{})
+	if err != nil {
+		return nil, err
+	}
+
+	for _, user := range users.Users {
+		userPolicies, err := i.iamAPI.ListUserPolicies(
+			&iam.ListUserPoliciesInput{UserName: user.UserName})
+		if err != nil {
+			return nil, err
+		}
+		if len(userPolicies.PolicyNames) > 0 {
+			userPoliciesRes = append(userPoliciesRes, i.userResult(aws.StringValue(user.UserName), rule, false, "User has inline policies attached"))
+			continue
+		}
+
+		attachedPolicies, err := i.iamAPI.ListAttachedUserPolicies(
+			&iam.ListAttachedUserPoliciesInput{UserName: user.UserName})
+		if err != nil {
+			return nil, err
+		}
+		if len(attachedPolicies.AttachedPolicies) > 0 {
+			userPoliciesRes = append(userPoliciesRes, i.userResult(aws.StringValue(user.UserName), rule, false, "User has managed policies attached"))
+			continue
+		}
+
+		userPoliciesRes = append(userPoliciesRes, i.userResult(aws.StringValue(user.UserName), rule, true, ""))
+	}
+
+	return userPoliciesRes, nil
 }
 
 func (i *IAM) userResult(name, rule string, compliant bool, reason string) Result {
