@@ -1,6 +1,9 @@
 package integration
 
 import (
+	"encoding/json"
+	"net/url"
+	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
@@ -19,7 +22,6 @@ type AWS struct {
 
 // New returns a new AWS integration
 func NewAWS(region string) (*AWS, error) {
-	// TODO: allow users to specify region
 	s, err := session.NewSession(aws.NewConfig().WithRegion(region))
 	if err != nil {
 		return nil, err
@@ -45,7 +47,7 @@ func (a *AWS) Check() ([]Result, error) {
 		return nil, err
 	}
 
-	return append(append(iamRes, s3Res...), vpcRes...), nil
+	return concatSlice(iamRes, s3Res, vpcRes), nil
 }
 
 // IAM checks that the user's IAM infra is SOC2 compliant
@@ -80,7 +82,18 @@ func (i *IAM) Check() ([]Result, error) {
 		return nil, err
 	}
 
-	return append(append(append(mfaRes, staleCredsRes...), rootMfaRes...), rootAccessKeysRes...), nil
+	adminPolicyRes, err := i.checkPolicyNoStatementsWithAdminAccess()
+	if err != nil {
+		return nil, err
+	}
+
+	return concatSlice(
+		mfaRes,
+		staleCredsRes,
+		rootMfaRes,
+		rootAccessKeysRes,
+		adminPolicyRes,
+	), nil
 }
 
 // checkConsoleMFA checks that IAM users with console access have MFA enabled
@@ -193,10 +206,78 @@ func (i *IAM) checkRootAccountAccessKeys() ([]Result, error) {
 	return []Result{i.userResult("root", rule, true, "")}, nil
 }
 
+// checkPolicyNoStatementsWithAdminAccess checks that there are no policy
+// statements with admin access
+func (i *IAM) checkPolicyNoStatementsWithAdminAccess() ([]Result, error) {
+	var statementsRes []Result
+	rule := "IAM policies must not have statements with admin access"
+
+	policies, err := i.iamAPI.ListPolicies(
+		&iam.ListPoliciesInput{Scope: aws.String("Local")},
+	)
+	if err != nil {
+		return nil, err
+	}
+
+NEXTPOLICY:
+	for _, policy := range policies.Policies {
+		defaultVer, err := i.iamAPI.GetPolicyVersion(
+			&iam.GetPolicyVersionInput{
+				PolicyArn: policy.Arn,
+				VersionId: policy.DefaultVersionId,
+			})
+		if err != nil {
+			return nil, err
+		}
+
+		defaultVerJSON, err := url.QueryUnescape(aws.StringValue(defaultVer.PolicyVersion.Document))
+		if err != nil {
+			return nil, err
+		}
+
+		var policyDoc map[string]interface{}
+		err = json.NewDecoder(strings.NewReader(defaultVerJSON)).Decode(&policyDoc)
+		if err != nil {
+			return nil, err
+		}
+
+		statements := policyDoc["Statement"].([]interface{})
+		for _, statement := range statements {
+			statementMap := statement.(map[string]interface{})
+			isEffectAllow := statementMap["Effect"].(string) == "Allow"
+			isActionAdmin := statementMap["Action"] == "*"
+			isResourceAdmin := statementMap["Resource"] == "*"
+			if isEffectAllow && isActionAdmin && isResourceAdmin {
+				statementsRes = append(
+					statementsRes,
+					i.policyResult(aws.StringValue(policy.Arn), rule, false, "Policy has statement with admin access"),
+				)
+				continue NEXTPOLICY
+			}
+		}
+
+		statementsRes = append(statementsRes, i.policyResult(aws.StringValue(policy.Arn), rule, true, ""))
+	}
+
+	return statementsRes, nil
+}
+
 func (i *IAM) userResult(name, rule string, compliant bool, reason string) Result {
 	return Result{
 		Resource: Resource{
 			Type: "aws/iam-user",
+			Name: name,
+		},
+		Rule:      rule,
+		Compliant: compliant,
+		Reason:    reason,
+	}
+}
+
+func (i *IAM) policyResult(name, rule string, compliant bool, reason string) Result {
+	return Result{
+		Resource: Resource{
+			Type: "aws/iam-policy",
 			Name: name,
 		},
 		Rule:      rule,
