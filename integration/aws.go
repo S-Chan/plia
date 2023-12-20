@@ -8,6 +8,7 @@ import (
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
+	"github.com/aws/aws-sdk-go/service/cloudtrail"
 	"github.com/aws/aws-sdk-go/service/ec2"
 	"github.com/aws/aws-sdk-go/service/iam"
 	"github.com/aws/aws-sdk-go/service/s3"
@@ -15,19 +16,32 @@ import (
 
 // AWS checks that the user's AWS infra is SOC2 compliant
 type AWS struct {
-	IAM *IAM
-	S3  *S3
-	VPC *VPC
+	IAM        *IAM
+	S3         *S3
+	VPC        *VPC
+	CloudTrail *CloudTrail
 }
 
 // New returns a new AWS integration
 func NewAWS(region string) (*AWS, error) {
-	s, err := session.NewSession(aws.NewConfig().WithRegion(region))
+	s := session.Must(session.NewSession(aws.NewConfig().WithRegion(region)))
+
+	ec2API := ec2.New(s)
+	regionOut, err := ec2API.DescribeRegions(nil)
 	if err != nil {
 		return nil, err
 	}
+	var regions []string
+	for _, r := range regionOut.Regions {
+		regions = append(regions, aws.StringValue(r.RegionName))
+	}
 
-	return &AWS{IAM: NewIAM(s), S3: NewS3(s), VPC: NewVPC(s)}, nil
+	return &AWS{
+		IAM:        NewIAM(s),
+		S3:         NewS3(s),
+		VPC:        NewVPC(s, regions),
+		CloudTrail: NewCloudTrail(s, regions),
+	}, nil
 }
 
 // Check checks that the user's AWS infra is SOC2 compliant
@@ -47,7 +61,12 @@ func (a *AWS) Check() ([]Result, error) {
 		return nil, err
 	}
 
-	return concatSlice(iamRes, s3Res, vpcRes), nil
+	cloudTrailRes, err := a.CloudTrail.Check()
+	if err != nil {
+		return nil, err
+	}
+
+	return concatSlice(iamRes, s3Res, vpcRes, cloudTrailRes), nil
 }
 
 // IAM checks that the user's IAM infra is SOC2 compliant
@@ -404,12 +423,13 @@ func (s *S3) bucketResult(bucket *s3.Bucket, rule string, compliant bool, reason
 
 // VPC checks that the user's VPCs are SOC2 compliant
 type VPC struct {
-	ec2API *ec2.EC2
+	ec2API  *ec2.EC2
+	regions []string
 }
 
 // NewVPC returns a new VPC integration
-func NewVPC(s *session.Session) *VPC {
-	return &VPC{ec2API: ec2.New(s)}
+func NewVPC(s *session.Session, regions []string) *VPC {
+	return &VPC{ec2API: ec2.New(s), regions: regions}
 }
 
 // Check checks that the user's VPCs are SOC2 compliant
@@ -422,16 +442,10 @@ func (v *VPC) checkVPCFlowLogs() ([]Result, error) {
 	var vpcRes []Result
 	rule := "VPC flow logs must be enabled"
 
-	// use describe-region api to list all regions
-	regions, err := v.ec2API.DescribeRegions(nil)
-	if err != nil {
-		return nil, err
-	}
-
-	for _, region := range regions.Regions {
+	for _, region := range v.regions {
 		regionSession := session.Must(
 			session.NewSession(
-				aws.NewConfig().WithRegion(aws.StringValue(region.RegionName))))
+				aws.NewConfig().WithRegion(region)))
 		regionEC2API := ec2.New(regionSession)
 
 		vpcs, err := regionEC2API.DescribeVpcs(nil)
@@ -470,6 +484,91 @@ func (v *VPC) vpcResult(vpc *ec2.Vpc, rule string, compliant bool, reason string
 		Resource: Resource{
 			Type: "aws/vpc",
 			Name: aws.StringValue(vpc.VpcId),
+		},
+		Rule:      rule,
+		Compliant: compliant,
+		Reason:    reason,
+	}
+}
+
+// CloudTrail checks that the user's CloudTrail is SOC2 compliant
+type CloudTrail struct {
+	cloudTrailAPI *cloudtrail.CloudTrail
+	regions       []string
+}
+
+// NewCloudTrail returns a new CloudTrail integration
+func NewCloudTrail(s *session.Session, regions []string) *CloudTrail {
+	return &CloudTrail{cloudTrailAPI: cloudtrail.New(s), regions: regions}
+}
+
+// Check checks that the user's CloudTrail is SOC2 compliant
+func (c *CloudTrail) Check() ([]Result, error) {
+	return c.checkCloudTrailEncryption()
+}
+
+// checkCloudTrailEncryption checks that CloudTrail is encrypted
+func (c *CloudTrail) checkCloudTrailEncryption() ([]Result, error) {
+	var ctRes []Result
+	rule := "CloudTrail must be encrypted"
+
+	trails, err := c.cloudTrailAPI.DescribeTrails(nil)
+	if err != nil {
+		return nil, err
+	}
+
+	// first, check for multi-region trails
+	for _, trail := range trails.TrailList {
+		if !aws.BoolValue(trail.IsMultiRegionTrail) {
+			continue
+		}
+
+		if aws.StringValue(trail.KmsKeyId) == "" {
+			ctRes = append(
+				ctRes,
+				c.trailResult(trail, rule, false, "CloudTrail is not encrypted"),
+			)
+			continue
+		}
+		ctRes = append(ctRes, c.trailResult(trail, rule, true, ""))
+	}
+
+	// next, check for single-region trails
+	for _, region := range c.regions {
+		regionSession := session.Must(
+			session.NewSession(
+				aws.NewConfig().WithRegion(region)))
+		regionCloudTrailAPI := cloudtrail.New(regionSession)
+
+		trails, err := regionCloudTrailAPI.DescribeTrails(nil)
+		if err != nil {
+			return nil, err
+		}
+
+		for _, trail := range trails.TrailList {
+			if aws.BoolValue(trail.IsMultiRegionTrail) {
+				continue
+			}
+
+			if aws.StringValue(trail.KmsKeyId) == "" {
+				ctRes = append(
+					ctRes,
+					c.trailResult(trail, rule, false, "CloudTrail is not encrypted"),
+				)
+				continue
+			}
+			ctRes = append(ctRes, c.trailResult(trail, rule, true, ""))
+		}
+	}
+
+	return ctRes, nil
+}
+
+func (c *CloudTrail) trailResult(trail *cloudtrail.Trail, rule string, compliant bool, reason string) Result {
+	return Result{
+		Resource: Resource{
+			Type: "aws/cloudtrail",
+			Name: aws.StringValue(trail.Name),
 		},
 		Rule:      rule,
 		Compliant: compliant,
