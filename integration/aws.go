@@ -434,7 +434,17 @@ func NewVPC(s *session.Session, regions []string) *VPC {
 
 // Check checks that the user's VPCs are SOC2 compliant
 func (v *VPC) Check() ([]Result, error) {
-	return v.checkVPCFlowLogs()
+	flowLogsRes, err := v.checkVPCFlowLogs()
+	if err != nil {
+		return nil, err
+	}
+
+	vpcDefaultSGRes, err := v.checkVPCDefaultSecurityGroup()
+	if err != nil {
+		return nil, err
+	}
+
+	return append(flowLogsRes, vpcDefaultSGRes...), nil
 }
 
 // checkVPCFlowLogs checks that VPC flow logs are enabled
@@ -476,6 +486,57 @@ func (v *VPC) checkVPCFlowLogs() ([]Result, error) {
 		}
 	}
 
+	return vpcRes, nil
+}
+
+// checkVPCDefaultSecurityGroup checks that the default security group has no
+// inbound or outbound rules
+func (v *VPC) checkVPCDefaultSecurityGroup() ([]Result, error) {
+	var vpcRes []Result
+	rule := "VPC default security group must have no inbound or outbound rules"
+
+	for _, region := range v.regions {
+		regionSession := session.Must(
+			session.NewSession(
+				aws.NewConfig().WithRegion(region)))
+		regionEC2API := ec2.New(regionSession)
+
+		vpcs, err := regionEC2API.DescribeVpcs(nil)
+		if err != nil {
+			return nil, err
+		}
+
+		for _, vpc := range vpcs.Vpcs {
+			sgs, err := regionEC2API.DescribeSecurityGroups(
+				&ec2.DescribeSecurityGroupsInput{Filters: []*ec2.Filter{
+					{
+						Name:   aws.String("group-name"),
+						Values: []*string{aws.String("default")},
+					},
+					{
+						Name:   aws.String("vpc-id"),
+						Values: []*string{vpc.VpcId},
+					},
+				}})
+			if err != nil {
+				return nil, err
+			}
+
+			for _, sg := range sgs.SecurityGroups {
+				if len(sg.IpPermissions) == 0 && len(sg.IpPermissionsEgress) == 0 {
+					vpcRes = append(
+						vpcRes,
+						v.vpcResult(vpc, rule, true, ""),
+					)
+				} else {
+					vpcRes = append(
+						vpcRes,
+						v.vpcResult(vpc, rule, false, "Default security group has inbound or outbound rules"),
+					)
+				}
+			}
+		}
+	}
 	return vpcRes, nil
 }
 
