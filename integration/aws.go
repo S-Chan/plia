@@ -565,7 +565,17 @@ func NewCloudTrail(s *session.Session, regions []string) *CloudTrail {
 
 // Check checks that the user's CloudTrail is SOC2 compliant
 func (c *CloudTrail) Check() ([]Result, error) {
-	return c.checkCloudTrailEncryption()
+	cloudTrailEncryptionRes, err := c.checkCloudTrailEncryption()
+	if err != nil {
+		return nil, err
+	}
+
+	multiRegionRes, err := c.checkMultiRegionTrail()
+	if err != nil {
+		return nil, err
+	}
+
+	return append(cloudTrailEncryptionRes, multiRegionRes...), nil
 }
 
 // checkCloudTrailEncryption checks that CloudTrail is encrypted
@@ -623,6 +633,42 @@ func (c *CloudTrail) checkCloudTrailEncryption() ([]Result, error) {
 	}
 
 	return ctRes, nil
+}
+
+// checkMultiRegionTrail checks that CloudTrail has at least one multi-region
+// trail enabled
+func (c *CloudTrail) checkMultiRegionTrail() ([]Result, error) {
+	rule := "CloudTrail must have multi-region trails enabled"
+
+	trails, err := c.cloudTrailAPI.DescribeTrails(nil)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, trail := range trails.TrailList {
+		if aws.BoolValue(trail.IsMultiRegionTrail) {
+			eventSelectors, err := c.cloudTrailAPI.GetEventSelectors(
+				&cloudtrail.GetEventSelectorsInput{
+					TrailName: trail.Name,
+				})
+			if err != nil {
+				return nil, err
+			}
+			if len(eventSelectors.EventSelectors) != 0 {
+				for _, selector := range eventSelectors.EventSelectors {
+					// Any event selector matching an event is logged, so this
+					// trail meets the rule requirements.
+					if aws.BoolValue(selector.IncludeManagementEvents) && len(selector.ExcludeManagementEventSources) == 0 {
+						return []Result{c.trailResult(trail, rule, true, "")}, nil
+					}
+				}
+			}
+			// TODO: determine if trails with advanced event selectors can log
+			// all required events
+		}
+	}
+
+	return []Result{c.trailResult(nil, rule, false, "CloudTrail does not have multi-region trails enabled")}, nil
 }
 
 func (c *CloudTrail) trailResult(trail *cloudtrail.Trail, rule string, compliant bool, reason string) Result {
