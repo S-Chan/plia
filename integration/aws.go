@@ -575,7 +575,12 @@ func (c *CloudTrail) Check() ([]Result, error) {
 		return nil, err
 	}
 
-	return append(cloudTrailEncryptionRes, multiRegionRes...), nil
+	logValidationRes, err := c.checkLogValidation()
+	if err != nil {
+		return nil, err
+	}
+
+	return concatSlice(cloudTrailEncryptionRes, multiRegionRes, logValidationRes), nil
 }
 
 // checkCloudTrailEncryption checks that CloudTrail is encrypted
@@ -669,6 +674,30 @@ func (c *CloudTrail) checkMultiRegionTrail() ([]Result, error) {
 	}
 
 	return []Result{c.trailResult(nil, rule, false, "CloudTrail does not have multi-region trails enabled")}, nil
+}
+
+// checkLogValidation checks that CloudTrail log file validation is enabled
+func (c *CloudTrail) checkLogValidation() ([]Result, error) {
+	var ctRes []Result
+	rule := "CloudTrail must have log file validation enabled"
+
+	trails, err := c.cloudTrailAPI.DescribeTrails(nil)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, trail := range trails.TrailList {
+		if aws.BoolValue(trail.LogFileValidationEnabled) {
+			ctRes = append(ctRes, c.trailResult(trail, rule, true, ""))
+			continue
+		}
+		ctRes = append(
+			ctRes,
+			c.trailResult(trail, rule, false, "CloudTrail does not have log file validation enabled"),
+		)
+	}
+
+	return ctRes, nil
 }
 
 func (c *CloudTrail) trailResult(trail *cloudtrail.Trail, rule string, compliant bool, reason string) Result {
