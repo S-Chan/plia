@@ -444,7 +444,12 @@ func (v *VPC) Check() ([]Result, error) {
 		return nil, err
 	}
 
-	return append(flowLogsRes, vpcDefaultSGRes...), nil
+	restrictedSSH, err := v.checkRestrictedSSH()
+	if err != nil {
+		return nil, err
+	}
+
+	return concatSlice(flowLogsRes, vpcDefaultSGRes, restrictedSSH), nil
 }
 
 // checkVPCFlowLogs checks that VPC flow logs are enabled
@@ -526,14 +531,83 @@ func (v *VPC) checkVPCDefaultSecurityGroup() ([]Result, error) {
 				if len(sg.IpPermissions) == 0 && len(sg.IpPermissionsEgress) == 0 {
 					vpcRes = append(
 						vpcRes,
-						v.vpcResult(vpc, rule, true, ""),
+						v.sgResult(sg, rule, true, ""),
 					)
 				} else {
 					vpcRes = append(
 						vpcRes,
-						v.vpcResult(vpc, rule, false, "Default security group has inbound or outbound rules"),
+						v.sgResult(sg, rule, false, "Default security group has inbound or outbound rules"),
 					)
 				}
+			}
+		}
+	}
+	return vpcRes, nil
+}
+
+// checkRestrictedSSH checks that SSH is restricted, i.e. not accessible from
+// 0.0.0.0/0 or ::/0
+func (v *VPC) checkRestrictedSSH() ([]Result, error) {
+	var vpcRes []Result
+	rule := "SSH must not be accessible from 0.0.0.0/0 or ::/0"
+
+	for _, region := range v.regions {
+		regionSession := session.Must(
+			session.NewSession(
+				aws.NewConfig().WithRegion(region)))
+		regionEC2API := ec2.New(regionSession)
+
+		vpcs, err := regionEC2API.DescribeVpcs(nil)
+		if err != nil {
+			return nil, err
+		}
+
+		for _, vpc := range vpcs.Vpcs {
+			sgs, err := regionEC2API.DescribeSecurityGroups(
+				&ec2.DescribeSecurityGroupsInput{Filters: []*ec2.Filter{
+					{
+						Name:   aws.String("vpc-id"),
+						Values: []*string{vpc.VpcId},
+					},
+				}})
+			if err != nil {
+				return nil, err
+			}
+
+		NEXTSG:
+			for _, sg := range sgs.SecurityGroups {
+				for _, ipPermission := range sg.IpPermissions {
+					for _, ipRange := range ipPermission.IpRanges {
+						if aws.StringValue(ipRange.CidrIp) == "0.0.0.0/0" &&
+							aws.Int64Value(ipPermission.FromPort) <= 22 &&
+							aws.Int64Value(ipPermission.ToPort) >= 22 &&
+							aws.StringValue(ipPermission.IpProtocol) == "tcp" {
+							vpcRes = append(
+								vpcRes,
+								v.sgResult(sg, rule, false, "SSH is accessible from all IPv4 Addresses"),
+							)
+							continue NEXTSG
+						}
+					}
+
+					for _, ipRange := range ipPermission.Ipv6Ranges {
+						if aws.StringValue(ipRange.CidrIpv6) == "::/0" &&
+							aws.Int64Value(ipPermission.FromPort) <= 22 &&
+							aws.Int64Value(ipPermission.ToPort) >= 22 &&
+							aws.StringValue(ipPermission.IpProtocol) == "tcp" {
+							vpcRes = append(
+								vpcRes,
+								v.sgResult(sg, rule, false, "SSH is accessible from all IPv6 Addresses"),
+							)
+							continue NEXTSG
+						}
+					}
+				}
+
+				vpcRes = append(
+					vpcRes,
+					v.sgResult(sg, rule, true, ""),
+				)
 			}
 		}
 	}
@@ -545,6 +619,18 @@ func (v *VPC) vpcResult(vpc *ec2.Vpc, rule string, compliant bool, reason string
 		Resource: Resource{
 			Type: "aws/vpc",
 			Name: aws.StringValue(vpc.VpcId),
+		},
+		Rule:      rule,
+		Compliant: compliant,
+		Reason:    reason,
+	}
+}
+
+func (v *VPC) sgResult(sg *ec2.SecurityGroup, rule string, compliant bool, reason string) Result {
+	return Result{
+		Resource: Resource{
+			Type: "aws/security-group",
+			Name: aws.StringValue(sg.GroupId),
 		},
 		Rule:      rule,
 		Compliant: compliant,
@@ -673,7 +759,15 @@ func (c *CloudTrail) checkMultiRegionTrail() ([]Result, error) {
 		}
 	}
 
-	return []Result{c.trailResult(nil, rule, false, "CloudTrail does not have multi-region trails enabled")}, nil
+	return []Result{{
+		Resource: Resource{
+			Type: "aws/cloudtrail",
+			Name: "N/A",
+		},
+		Rule:      rule,
+		Compliant: false,
+		Reason:    "CloudTrail does not have multi-region trails enabled",
+	}}, nil
 }
 
 // checkLogValidation checks that CloudTrail log file validation is enabled
